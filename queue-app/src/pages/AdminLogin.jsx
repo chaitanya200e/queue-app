@@ -1,8 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { signInWithEmailAndPassword } from "firebase/auth";
-import { auth } from "../firebase/config";
+import { supabase } from "../supabase/config";
 import { showToast } from "../toast";
 import { checkAdminAccess } from "../hooks/useAuth";
 
@@ -23,10 +22,16 @@ export default function AdminLogin() {
     }
     setLoading(true);
     try {
-      const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
-      const allowed = await checkAdminAccess(cred.user);
+      const { data, error: authError } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password: password,
+      });
+      
+      if (authError) throw authError;
+      
+      const allowed = await checkAdminAccess(data.user);
       if (!allowed) {
-        await auth.signOut();
+        await supabase.auth.signOut();
         setError(t("auth.accountNotAllowed"));
         showToast.error(t("auth.accountNotAllowed"));
         return;
@@ -34,8 +39,19 @@ export default function AdminLogin() {
       showToast.success(t("auth.loginSuccess"));
       navigate("/admin");
     } catch (err) {
-      setError(t("auth.wrongCredentials"));
-      showToast.error(t("auth.wrongCredentials"));
+      console.error("Admin login error:", err);
+      const rawMessage = err?.message || "";
+      const lowerMessage = rawMessage.toLowerCase();
+      let message = rawMessage || t("auth.wrongCredentials");
+
+      if (lowerMessage.includes("invalid login credentials")) {
+        message = "Invalid email or password. If this admin only submitted a request, create the account from Admin Sign Up first.";
+      } else if (lowerMessage.includes("email not confirmed")) {
+        message = "Email is not confirmed. Confirm this user in Supabase Authentication first.";
+      }
+
+      setError(message);
+      showToast.error(message);
     } finally {
       setLoading(false);
     }

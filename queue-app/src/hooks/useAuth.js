@@ -1,18 +1,28 @@
 import { useState, useEffect } from "react";
-import { onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
-import { auth, db, ADMIN_EMAILS, SUPER_ADMIN_EMAILS } from "../firebase/config";
+import { supabase, ADMIN_EMAILS, SUPER_ADMIN_EMAILS } from "../supabase/config";
 
 export function useAuth() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => {
-      setUser(u);
+    let mounted = true;
+
+    supabase.auth.getUser().then(({ data }) => {
+      if (!mounted) return;
+      setUser(data.user || null);
       setLoading(false);
     });
-    return unsub;
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user || null);
+      setLoading(false);
+    });
+
+    return () => {
+      mounted = false;
+      listener.subscription.unsubscribe();
+    };
   }, []);
 
   return { user, loading };
@@ -33,8 +43,14 @@ export async function checkAdminAccess(user) {
   if (!user?.email) return false;
   if (isListedAdmin(user)) return true;
   try {
-    const snap = await getDoc(doc(db, "admins", user.email.toLowerCase()));
-    return snap.exists();
+    const { data, error } = await supabase
+      .from("admins")
+      .select("email")
+      .eq("email", user.email.toLowerCase())
+      .maybeSingle();
+
+    if (error) throw error;
+    return Boolean(data);
   } catch {
     return false;
   }
@@ -43,13 +59,19 @@ export async function checkAdminAccess(user) {
 export async function fetchAdminProfile(email) {
   if (!email) return { domain: "", scopeKey: "", scopeLabel: "" };
   try {
-    const snap = await getDoc(doc(db, "admins", email.toLowerCase()));
-    if (!snap.exists()) return { domain: "", scopeKey: "", scopeLabel: "" };
-    const data = snap.data() || {};
+    const { data, error } = await supabase
+      .from("admins")
+      .select("domain, scope_key, scope_label")
+      .eq("email", email.toLowerCase())
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!data) return { domain: "", scopeKey: "", scopeLabel: "" };
+
     return {
       domain: data.domain || "",
-      scopeKey: data.scopeKey || "",
-      scopeLabel: data.scopeLabel || "",
+      scopeKey: data.scope_key || "",
+      scopeLabel: data.scope_label || "",
     };
   } catch {
     return { domain: "", scopeKey: "", scopeLabel: "" };

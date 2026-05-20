@@ -1,9 +1,15 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { createUserWithEmailAndPassword } from "firebase/auth";
-import { doc, setDoc, serverTimestamp } from "firebase/firestore";
-import { auth, db } from "../firebase/config";
+import { supabase } from "../supabase/config";
 import { showToast } from "../toast";
+
+const PASSWORD_RULES = [
+  { id: "length", label: "At least 8 characters", test: (value) => value.length >= 8 },
+  { id: "upper", label: "One uppercase letter", test: (value) => /[A-Z]/.test(value) },
+  { id: "lower", label: "One lowercase letter", test: (value) => /[a-z]/.test(value) },
+  { id: "number", label: "One number", test: (value) => /\d/.test(value) },
+  { id: "special", label: "One special character", test: (value) => /[^A-Za-z0-9]/.test(value) },
+];
 
 export default function AdminSignup() {
   const navigate = useNavigate();
@@ -13,6 +19,8 @@ export default function AdminSignup() {
   const [passConfirm, setPassConfirm] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const passwordChecks = PASSWORD_RULES.map((rule) => ({ ...rule, passed: rule.test(pass) }));
+  const passwordIsStrong = passwordChecks.every((rule) => rule.passed);
 
   async function handleSignup() {
     setError("");
@@ -21,9 +29,9 @@ export default function AdminSignup() {
       showToast.error("Please fill all fields.");
       return;
     }
-    if (pass.length < 6) { 
-      setError("Password must be at least 6 characters.");
-      showToast.error("Password must be at least 6 characters.");
+    if (!passwordIsStrong) { 
+      setError("Password must meet all security requirements.");
+      showToast.error("Password must meet all security requirements.");
       return;
     }
     if (pass !== passConfirm) { 
@@ -34,12 +42,15 @@ export default function AdminSignup() {
 
     setLoading(true);
     try {
-      const cred = await createUserWithEmailAndPassword(auth, email.trim(), pass);
-      await setDoc(doc(db, "admin_profiles", cred.user.uid), {
-        name, email: email.toLowerCase(), createdAt: serverTimestamp(),
+      const { error: authError } = await supabase.auth.signUp({
+        email: email.trim(),
+        password: pass,
       });
+      
+      if (authError) throw authError;
+
       showToast.success("Account created. Redirecting to request access...");
-      setTimeout(() => navigate("/admin-request"), 1000);
+      setTimeout(() => navigate("/admin-request", { state: { name, email: email.toLowerCase() } }), 1000);
     } catch (e) {
       const errorMsg = e?.message || "Signup failed";
       setError(errorMsg);
@@ -83,12 +94,20 @@ export default function AdminSignup() {
             />
             <input
               type="password"
-              placeholder="Password (min 6 chars)"
+              placeholder="Password"
               value={pass}
               onChange={(e) => setPass(e.target.value)}
               onKeyPress={handleKeyPress}
               disabled={loading}
             />
+            <div className="password-rules">
+              {passwordChecks.map((rule) => (
+                <div key={rule.id} className={rule.passed ? "password-rule passed" : "password-rule"}>
+                  <span>{rule.passed ? "✓" : "•"}</span>
+                  {rule.label}
+                </div>
+              ))}
+            </div>
             <input
               type="password"
               placeholder="Confirm Password"

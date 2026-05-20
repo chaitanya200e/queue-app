@@ -10,8 +10,7 @@ import {
   Tooltip,
   Legend,
 } from "chart.js";
-import { collection, getDocs } from "firebase/firestore";
-import { db } from "./firebase/config";
+import { supabase } from "./supabase/config";
 
 ChartJS.register(
   CategoryScale,
@@ -29,8 +28,14 @@ export default function AnalyticsChart({ domain = "", scopeKey = "" }) {
   useEffect(() => {
     async function fetchAnalytics() {
       try {
-        const queueDocs = await getDocs(collection(db, "queue"));
-        const allDocs = queueDocs.docs.map(d => d.data());
+        // Fetch queue data from Supabase
+        const { data: queueData, error } = await supabase
+          .from("queue")
+          .select("*");
+        
+        if (error) throw error;
+        
+        const allDocs = queueData || [];
 
         const now = new Date();
         const last7Days = [];
@@ -45,12 +50,10 @@ export default function AnalyticsChart({ domain = "", scopeKey = "" }) {
         }
 
         allDocs.forEach(doc => {
-          const servedAt = doc.servedAt;
+          const servedAt = doc.served_at;
           if (!servedAt || doc.status !== "served") return;
 
-          const servedDate = typeof servedAt.toDate === "function" 
-            ? servedAt.toDate() 
-            : new Date(servedAt);
+          const servedDate = new Date(servedAt);
           const dateStr = servedDate.toISOString().split("T")[0];
 
           // Filter by scope
@@ -59,7 +62,7 @@ export default function AnalyticsChart({ domain = "", scopeKey = "" }) {
             matchScope = String(doc.domain || "").toLowerCase() === domain.toLowerCase();
           }
           if (scopeKey && matchScope) {
-            const docScope = String(doc.domainLocation || doc.scopeKey || "").toLowerCase();
+            const docScope = String(doc.domain_location || doc.scope_key || "").toLowerCase();
             matchScope = docScope === scopeKey.toLowerCase();
           }
 

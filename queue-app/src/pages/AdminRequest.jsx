@@ -1,39 +1,22 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
-import { collection, addDoc, getDocs, query, where, serverTimestamp } from "firebase/firestore";
-import { db } from "../firebase/config";
+import { useLocation, useNavigate } from "react-router-dom";
+import { supabase } from "../supabase/config";
 import { showToast } from "../toast";
-
-const DOMAIN_FIELDS = {
-  bank: [
-    { id: "bankName", label: "Bank Name" },
-    { id: "branchCity", label: "Branch / City" },
-  ],
-  hospital: [
-    { id: "hospitalName", label: "Hospital Name" },
-    { id: "hospitalAddress", label: "Address (optional)", required: false },
-  ],
-  government: [
-    { id: "governmentOfficeName", label: "Government Office Name" },
-    { id: "governmentDepartment", label: "Department / City" },
-    { id: "governmentAddress", label: "Address (optional)", required: false },
-  ],
-  personal: [
-    { id: "orgName", label: "Organization Name" },
-    { id: "orgAddress", label: "Address (optional)", required: false },
-  ],
-};
+import { slugify } from "../constants";
 
 export default function AdminRequest() {
   const navigate = useNavigate();
-  const [reqName, setReqName] = useState("");
-  const [reqEmail, setReqEmail] = useState("");
+  const location = useLocation();
+  const [reqName, setReqName] = useState(location.state?.name || "");
+  const [reqEmail, setReqEmail] = useState(location.state?.email || "");
   const [domain, setDomain] = useState("");
   const [fields, setFields] = useState({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  useEffect(() => { setFields({}); }, [domain]);
+  useEffect(() => {
+    setFields({});
+  }, [domain]);
 
   async function handleSubmit() {
     setError("");
@@ -46,12 +29,15 @@ export default function AdminRequest() {
 
     setLoading(true);
     try {
-      const pending = await getDocs(
-        query(collection(db, "admin_requests"),
-          where("email", "==", reqEmail.toLowerCase()),
-          where("status", "==", "pending"))
-      );
-      if (!pending.empty) {
+      // Check if pending request exists
+      const { data: existing, error: checkError } = await supabase
+        .from("admin_requests")
+        .select("*")
+        .eq("email", reqEmail.toLowerCase())
+        .eq("status", "pending")
+        .single();
+      
+      if (existing) {
         const msg = "You already have a pending request. Please wait for approval.";
         setError(msg);
         showToast.error(msg);
@@ -59,56 +45,37 @@ export default function AdminRequest() {
         return;
       }
 
-      let organizationName = "", branchCity = "", address = "";
-
-      if (domain === "bank") {
-        if (!fields.bankName || !fields.branchCity) { 
-          const msg = "Please enter bank name and branch/city.";
-          setError(msg);
-          showToast.error(msg);
-          setLoading(false);
-          return;
-        }
-        organizationName = fields.bankName;
-        branchCity = fields.branchCity;
-      } else if (domain === "hospital") {
-        if (!fields.hospitalName) { 
-          const msg = "Please enter hospital name.";
-          setError(msg);
-          showToast.error(msg);
-          setLoading(false);
-          return;
-        }
-        organizationName = fields.hospitalName;
-        address = fields.hospitalAddress || "";
-      } else if (domain === "government") {
-        if (!fields.governmentOfficeName || !fields.governmentDepartment) {
-          const msg = "Please enter government office name and department/city.";
-          setError(msg);
-          showToast.error(msg);
-          setLoading(false);
-          return;
-        }
-        organizationName = fields.governmentOfficeName;
-        branchCity = fields.governmentDepartment;
-        address = fields.governmentAddress || "";
-      } else if (domain === "personal") {
-        if (!fields.orgName) { 
-          const msg = "Please enter organization name.";
-          setError(msg);
-          showToast.error(msg);
-          setLoading(false);
-          return;
-        }
-        organizationName = fields.orgName;
-        address = fields.orgAddress || "";
+      if (!fields.organizationName) {
+        const msg = "Please enter organization / branch / office name.";
+        setError(msg);
+        showToast.error(msg);
+        setLoading(false);
+        return;
       }
 
-      await addDoc(collection(db, "admin_requests"), {
-        name: reqName, email: reqEmail.toLowerCase(),
-        domain, organizationName, branchCity, address,
-        status: "pending", createdAt: serverTimestamp(),
-      });
+      const organizationName = fields.organizationName.trim();
+      const branchCity = fields.branchCity || "";
+      const address = fields.address || "";
+      const scopeLabel = organizationName;
+      const scopeKey = slugify(organizationName);
+
+      const { error: insertError } = await supabase
+        .from("admin_requests")
+        .insert([{
+          name: reqName,
+          email: reqEmail.toLowerCase(),
+          domain,
+          organization_name: organizationName,
+          branch_city: branchCity,
+          address,
+          scope_key: scopeKey,
+          scope_label: scopeLabel,
+          status: "pending",
+          created_at: new Date(),
+        }]);
+      
+      if (insertError) throw insertError;
+      
       showToast.success("Request submitted. Admin will review.");
       setTimeout(() => {
         setReqName(""); 
@@ -117,15 +84,14 @@ export default function AdminRequest() {
         setFields({});
       }, 500);
     } catch (e) {
-      const msg = "Failed to submit request";
+      console.error("Error submitting admin request:", e);
+      const msg = e?.message || "Failed to submit request";
       setError(msg);
       showToast.error(msg);
     } finally {
       setLoading(false);
     }
   }
-
-  const domainFields = DOMAIN_FIELDS[domain] || [];
 
   return (
     <div className="app">
@@ -166,16 +132,36 @@ export default function AdminRequest() {
               <option value="personal">Personal Organization</option>
             </select>
 
-            {domainFields.map((f) => (
-              <input
-                key={f.id}
-                type="text"
-                placeholder={f.label}
-                value={fields[f.id] || ""}
-                onChange={(e) => setFields((prev) => ({ ...prev, [f.id]: e.target.value }))}
-                disabled={loading}
-              />
-            ))}
+            {domain && (
+              <>
+                <input
+                  type="text"
+                  placeholder={
+                    domain === "bank" ? "Bank / Branch Name"
+                    : domain === "hospital" ? "Hospital Name"
+                    : domain === "government" ? "Office / Department Name"
+                    : "Organization Name"
+                  }
+                  value={fields.organizationName || ""}
+                  onChange={(e) => setFields((prev) => ({ ...prev, organizationName: e.target.value }))}
+                  disabled={loading}
+                />
+                <input
+                  type="text"
+                  placeholder="Branch / City (optional)"
+                  value={fields.branchCity || ""}
+                  onChange={(e) => setFields((prev) => ({ ...prev, branchCity: e.target.value }))}
+                  disabled={loading}
+                />
+                <input
+                  type="text"
+                  placeholder="Address (optional)"
+                  value={fields.address || ""}
+                  onChange={(e) => setFields((prev) => ({ ...prev, address: e.target.value }))}
+                  disabled={loading}
+                />
+              </>
+            )}
           </div>
 
           <div className="login-buttons">

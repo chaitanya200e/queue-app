@@ -1,9 +1,13 @@
 import { useTranslation } from "react-i18next";
 import { useState } from "react";
+import { useLocation } from "react-router-dom";
 
 export default function LanguageSelector() {
   const { i18n } = useTranslation();
+  const location = useLocation();
   const [isOpen, setIsOpen] = useState(false);
+
+  if (location.pathname === "/admin") return null;
 
   const languages = [
     { code: "en", name: "🇬🇧 English" },

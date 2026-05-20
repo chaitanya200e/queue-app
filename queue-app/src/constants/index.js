@@ -35,7 +35,7 @@ export const DOMAIN_LOCATIONS = {
   ],
 };
 
-export const LOCATION_DOMAINS = ["bank", "hospital", "government"];
+export const LOCATION_DOMAINS = ["bank", "hospital", "government", "personal"];
 
 export function slugify(value) {
   return String(value || "").toLowerCase().trim().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
