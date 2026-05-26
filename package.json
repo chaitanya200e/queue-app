@@ -1,0 +1,11 @@
+{
+  "name": "queue-react-app",
+  "private": true,
+  "version": "1.0.0",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "build": "npm --prefix queue-app install && npm --prefix queue-app run build"
+  }
+}
